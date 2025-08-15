@@ -11,6 +11,7 @@
         .container { max-width: 800px; }
         .card { margin-top: 2rem; }
         .spinner-border { display: none; }
+        .alert { margin-top: 1rem; }
     </style>
 </head>
 <body>
@@ -55,12 +56,12 @@
             <div class="card-header"><strong>Advanced PDF to Word (with OCR)</strong></div>
             <div class="card-body">
                 <p>Upload a PDF to convert it to a Word (.docx) file. Use OCR for scanned or image-based PDFs.</p>
-                <div class="input-group">
+                <div class="input-group mb-3">
                     <input class="form-control" type="file" id="ocrPdfInput" accept=".pdf">
                     <button class="btn btn-success" onclick="convertPdfToWord()">Convert to Word</button>
                 </div>
-                <div class="mt-3">
-                    <p class="mb-1"><strong>Conversion Mode:</strong> <small>(OCR is best for scanned documents)</small></p>
+                <div class="mb-3">
+                    <p class="mb-2"><strong>Conversion Mode:</strong> <small>(OCR is best for scanned documents)</small></p>
                      <div class="form-check">
                         <input class="form-check-input" type="radio" name="ocrMode" id="modeNoOcr" value="no_ocr" checked>
                         <label class="form-check-label" for="modeNoOcr">Without OCR (Extracts text directly)</label>
@@ -82,7 +83,7 @@
 <script>
     const { PDFDocument } = PDFLib;
     // IMPORTANT: Replace with your deployed Render.com backend URL
-    const OCR_BACKEND_URL = 'https://minimal-pdf-ocr.onrender.com'; 
+    const OCR_BACKEND_URL = 'https://your-app-name.onrender.com'; // Update this!
 
     function showStatus(elementId, message, isSuccess = true) {
         const el = document.getElementById(elementId);
@@ -94,9 +95,12 @@
         const size = (blob.size / 1024 / 1024).toFixed(2); // size in MB
         const message = `
             <strong>Success!</strong> File ready: 
-            <a href="${url}" download="${fileName}">Download ${fileName}</a> (${size} MB)
+            <a href="${url}" download="${fileName}" class="btn btn-outline-primary btn-sm">Download ${fileName}</a> (${size} MB)
         `;
         showStatus(statusElId, message);
+        
+        // Clean up the URL after 5 minutes
+        setTimeout(() => URL.revokeObjectURL(url), 300000);
     }
 
     // 1. PDF Merging Logic
@@ -106,21 +110,25 @@
             showStatus('mergeStatus', 'Please select at least 2 PDF files.', false);
             return;
         }
-        showStatus('mergeStatus', 'Merging... please wait.', true);
+        showStatus('mergeStatus', 'Merging... please wait.');
 
-        const mergedPdf = await PDFDocument.create();
-        for (const file of files) {
-            const pdfBytes = await file.arrayBuffer();
-            const pdf = await PDFDocument.load(pdfBytes);
-            const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
-            copiedPages.forEach(page => mergedPdf.addPage(page));
+        try {
+            const mergedPdf = await PDFDocument.create();
+            for (const file of files) {
+                const pdfBytes = await file.arrayBuffer();
+                const pdf = await PDFDocument.load(pdfBytes);
+                const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+                copiedPages.forEach(page => mergedPdf.addPage(page));
+            }
+            
+            const shouldCompress = document.getElementById('compressCheck').checked;
+            const saveOptions = { useObjectStreams: !shouldCompress };
+            const mergedPdfBytes = await mergedPdf.save(saveOptions);
+
+            createDownloadLink(new Blob([mergedPdfBytes], { type: 'application/pdf' }), 'merged.pdf', 'mergeStatus');
+        } catch (error) {
+            showStatus('mergeStatus', `Error merging PDFs: ${error.message}`, false);
         }
-        
-        const shouldCompress = document.getElementById('compressCheck').checked;
-        const saveOptions = { useObjectStreams: !shouldCompress }; // Disabling object streams can sometimes reduce size
-        const mergedPdfBytes = await mergedPdf.save(saveOptions);
-
-        createDownloadLink(new Blob([mergedPdfBytes], { type: 'application/pdf' }), 'merged.pdf', 'mergeStatus');
     }
 
     // 2. Image to PDF Logic
@@ -130,19 +138,34 @@
             showStatus('imageStatus', 'Please select at least one image file.', false);
             return;
         }
-        showStatus('imageStatus', 'Converting images... please wait.', true);
+        showStatus('imageStatus', 'Converting images... please wait.');
 
-        const pdfDoc = await PDFDocument.create();
-        for (const file of files) {
-            const imgBytes = await file.arrayBuffer();
-            const image = await (file.type === 'image/png' ? pdfDoc.embedPng(imgBytes) : pdfDoc.embedJpg(imgBytes));
+        try {
+            const pdfDoc = await PDFDocument.create();
+            for (const file of files) {
+                const imgBytes = await file.arrayBuffer();
+                const image = await (file.type === 'image/png' ? pdfDoc.embedPng(imgBytes) : pdfDoc.embedJpg(imgBytes));
+                
+                // Scale image to fit A4 page while maintaining aspect ratio
+                const maxWidth = 595;
+                const maxHeight = 842;
+                let { width, height } = image;
+                
+                if (width > maxWidth || height > maxHeight) {
+                    const ratio = Math.min(maxWidth / width, maxHeight / height);
+                    width *= ratio;
+                    height *= ratio;
+                }
+                
+                const page = pdfDoc.addPage([width, height]);
+                page.drawImage(image, { x: 0, y: 0, width, height });
+            }
             
-            const page = pdfDoc.addPage([image.width, image.height]);
-            page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+            const pdfBytes = await pdfDoc.save();
+            createDownloadLink(new Blob([pdfBytes], { type: 'application/pdf' }), 'converted-images.pdf', 'imageStatus');
+        } catch (error) {
+            showStatus('imageStatus', `Error converting images: ${error.message}`, false);
         }
-        
-        const pdfBytes = await pdfDoc.save();
-        createDownloadLink(new Blob([pdfBytes], { type: 'application/pdf' }), 'converted-images.pdf', 'imageStatus');
     }
 
     // 3. Advanced OCR Conversion Logic
@@ -155,8 +178,8 @@
         }
 
         const spinner = document.querySelector('#ocrStatus .spinner-border');
-        spinner.style.display = 'block';
-        showStatus('ocrStatus', 'Uploading and processing... This may take a moment for large files or OCR.', true);
+        spinner.style.display = 'inline-block';
+        showStatus('ocrStatus', 'Processing PDF... This may take a few moments.');
         
         const mode = document.querySelector('input[name="ocrMode"]:checked').value;
         const formData = new FormData();
@@ -164,24 +187,39 @@
         formData.append('mode', mode);
 
         try {
-            const response = await fetch(OCR_BACKEND_URL, {
+            const response = await fetch(`${OCR_BACKEND_URL}/convert-pdf-to-word`, {
                 method: 'POST',
                 body: formData
             });
 
             if (!response.ok) {
-                throw new Error(`Server error: ${response.statusText}`);
+                const errorData = await response.json();
+                throw new Error(errorData.error || `Server error: ${response.statusText}`);
             }
 
             const blob = await response.blob();
-            createDownloadLink(blob, `converted-${mode}.docx`, 'ocrStatus');
+            const filename = mode === 'ocr' ? 'converted_ocr.docx' : 'converted_text.docx';
+            createDownloadLink(blob, filename, 'ocrStatus');
 
         } catch (error) {
+            console.error('Conversion error:', error);
             showStatus('ocrStatus', `Conversion failed: ${error.message}`, false);
         } finally {
             spinner.style.display = 'none';
         }
     }
+
+    // Test backend connection on page load
+    window.addEventListener('DOMContentLoaded', async () => {
+        try {
+            const response = await fetch(OCR_BACKEND_URL);
+            if (!response.ok) {
+                console.warn('Backend connection test failed');
+            }
+        } catch (error) {
+            console.warn('Could not connect to backend:', error.message);
+        }
+    });
 </script>
 </body>
 </html>
