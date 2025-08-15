@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minimal PDF Tools</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    <style>
+        body { background-color: #f8f9fa; }
+        .container { max-width: 800px; }
+        .card { margin-top: 2rem; }
+        .spinner-border { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container py-5">
+        <div class="text-center mb-4">
+            <h1>📄 Minimal PDF Tools</h1>
+            <p class="lead">Fast, free, and browser-based PDF utilities.</p>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><strong>PDF Merging Tool</strong></div>
+            <div class="card-body">
+                <p>Select multiple PDF files to merge into a single document.</p>
+                <input class="form-control" type="file" id="pdfMergeInput" multiple accept=".pdf">
+                <div class="form-check my-3">
+                    <input class="form-check-input" type="checkbox" id="compressCheck">
+                    <label class="form-check-label" for="compressCheck">Compress/Optimize PDF (Reduces file size)</label>
+                </div>
+                <button class="btn btn-primary" onclick="mergePdfs()">Merge PDFs</button>
+                <div id="mergeStatus" class="mt-3"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><strong>Image to PDF Converter</strong></div>
+            <div class="card-body">
+                <p>Select multiple images (JPG, PNG) to convert into a single PDF.</p>
+                <input class="form-control" type="file" id="imagePdfInput" multiple accept="image/jpeg, image/png">
+                <button class="btn btn-primary mt-3" onclick="convertImagesToPdf()">Convert to PDF</button>
+                <div id="imageStatus" class="mt-3"></div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <div class="card-header"><strong>File Conversion Tools</strong></div>
+            <div class="card-body">
+                 <p class="text-muted">Common conversions like Word/Excel to PDF require a backend. The OCR tool below demonstrates PDF to Word conversion.</p>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header"><strong>Advanced PDF to Word (with OCR)</strong></div>
+            <div class="card-body">
+                <p>Upload a PDF to convert it to a Word (.docx) file. Use OCR for scanned or image-based PDFs.</p>
+                <div class="input-group">
+                    <input class="form-control" type="file" id="ocrPdfInput" accept=".pdf">
+                    <button class="btn btn-success" onclick="convertPdfToWord()">Convert to Word</button>
+                </div>
+                <div class="mt-3">
+                    <p class="mb-1"><strong>Conversion Mode:</strong> <small>(OCR is best for scanned documents)</small></p>
+                     <div class="form-check">
+                        <input class="form-check-input" type="radio" name="ocrMode" id="modeNoOcr" value="no_ocr" checked>
+                        <label class="form-check-label" for="modeNoOcr">Without OCR (Extracts text directly)</label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="ocrMode" id="modeOcr" value="ocr">
+                        <label class="form-check-label" for="modeOcr">With OCR (Processes pages as images)</label>
+                    </div>
+                </div>
+                <div id="ocrStatus" class="mt-3">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    const { PDFDocument } = PDFLib;
+    // IMPORTANT: Replace with your deployed Render.com backend URL
+    const OCR_BACKEND_URL = 'https://your-render-app-name.onrender.com/convert-pdf-to-word'; 
+
+    function showStatus(elementId, message, isSuccess = true) {
+        const el = document.getElementById(elementId);
+        el.innerHTML = `<div class="alert ${isSuccess ? 'alert-success' : 'alert-danger'}">${message}</div>`;
+    }
+
+    function createDownloadLink(blob, fileName, statusElId) {
+        const url = URL.createObjectURL(blob);
+        const size = (blob.size / 1024 / 1024).toFixed(2); // size in MB
+        const message = `
+            <strong>Success!</strong> File ready: 
+            <a href="${url}" download="${fileName}">Download ${fileName}</a> (${size} MB)
+        `;
+        showStatus(statusElId, message);
+    }
+
+    // 1. PDF Merging Logic
+    async function mergePdfs() {
+        const files = document.getElementById('pdfMergeInput').files;
+        if (files.length < 2) {
+            showStatus('mergeStatus', 'Please select at least 2 PDF files.', false);
+            return;
+        }
+        showStatus('mergeStatus', 'Merging... please wait.', true);
+
+        const mergedPdf = await PDFDocument.create();
+        for (const file of files) {
+            const pdfBytes = await file.arrayBuffer();
+            const pdf = await PDFDocument.load(pdfBytes);
+            const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+            copiedPages.forEach(page => mergedPdf.addPage(page));
+        }
+        
+        const shouldCompress = document.getElementById('compressCheck').checked;
+        const saveOptions = { useObjectStreams: !shouldCompress }; // Disabling object streams can sometimes reduce size
+        const mergedPdfBytes = await mergedPdf.save(saveOptions);
+
+        createDownloadLink(new Blob([mergedPdfBytes], { type: 'application/pdf' }), 'merged.pdf', 'mergeStatus');
+    }
+
+    // 2. Image to PDF Logic
+    async function convertImagesToPdf() {
+        const files = document.getElementById('imagePdfInput').files;
+        if (files.length === 0) {
+            showStatus('imageStatus', 'Please select at least one image file.', false);
+            return;
+        }
+        showStatus('imageStatus', 'Converting images... please wait.', true);
+
+        const pdfDoc = await PDFDocument.create();
+        for (const file of files) {
+            const imgBytes = await file.arrayBuffer();
+            const image = await (file.type === 'image/png' ? pdfDoc.embedPng(imgBytes) : pdfDoc.embedJpg(imgBytes));
+            
+            const page = pdfDoc.addPage([image.width, image.height]);
+            page.drawImage(image, { x: 0, y: 0, width: image.width, height: image.height });
+        }
+        
+        const pdfBytes = await pdfDoc.save();
+        createDownloadLink(new Blob([pdfBytes], { type: 'application/pdf' }), 'converted-images.pdf', 'imageStatus');
+    }
+
+    // 3. Advanced OCR Conversion Logic
+    async function convertPdfToWord() {
+        const fileInput = document.getElementById('ocrPdfInput');
+        const file = fileInput.files[0];
+        if (!file) {
+            showStatus('ocrStatus', 'Please select a PDF file to convert.', false);
+            return;
+        }
+
+        const spinner = document.querySelector('#ocrStatus .spinner-border');
+        spinner.style.display = 'block';
+        showStatus('ocrStatus', 'Uploading and processing... This may take a moment for large files or OCR.', true);
+        
+        const mode = document.querySelector('input[name="ocrMode"]:checked').value;
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('mode', mode);
+
+        try {
+            const response = await fetch(OCR_BACKEND_URL, {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!response.ok) {
+                throw new Error(`Server error: ${response.statusText}`);
+            }
+
+            const blob = await response.blob();
+            createDownloadLink(blob, `converted-${mode}.docx`, 'ocrStatus');
+
+        } catch (error) {
+            showStatus('ocrStatus', `Conversion failed: ${error.message}`, false);
+        } finally {
+            spinner.style.display = 'none';
+        }
+    }
+</script>
+</body>
+</html>
