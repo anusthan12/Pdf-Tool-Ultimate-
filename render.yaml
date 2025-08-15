@@ -1,0 +1,25 @@
+# render.yaml
+# This file tells Render how to build and run your service.
+
+services:
+  # A Web Service for your Python backend
+  - type: web
+    name: minimal-pdf-ocr
+    # Runtime environment
+    env: python
+    # Specify the Python version
+    pythonVersion: '3.11' # Using a stable, common version
+    # Define system packages to install using apt
+    envVars:
+      - key: C.UTF-8
+        value: en_US.UTF-8
+    # System packages to install
+    packages:
+      - key: tesseract-ocr
+      - key: poppler-utils
+    # Command to install Python dependencies
+    buildCommand: "pip install -r requirements.txt"
+    # Command to start the Gunicorn server
+    startCommand: "gunicorn ocr_backend:app"
+    # Set the plan to 'free'
+    plan: free
